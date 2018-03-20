@@ -3,6 +3,7 @@ import sys
 import struct
 from io import open, BytesIO, SEEK_CUR, SEEK_END  # noqa
 
+
 PY2 = sys.version_info[0] == 2
 
 # Kaitai Struct runtime streaming API version, defined as per PEP-0396
@@ -47,7 +48,95 @@ class KaitaiStruct(object):
         return cls(KaitaiStream(io))
 
 
-class KaitaiStream(object):
+class Endianness:
+    """Just stores the description of endianness"""
+    __slots__=("name", "char")
+    def __init__(self, name, char):
+       self.name=name
+       self.char=char
+
+class KaitaiNativeNumberType:
+    """Represents a type, which can take a finite set of fixed lengths and available to 'struct' module. This class is used to store the info to generate them automatically."""
+    __slots__=("typeName", "sizesTable")
+    endianessesTable=[
+        Endianness("", "="),
+        Endianness("le", "<"),
+        Endianness("be", ">")
+    ]
+
+    def readFuncFac(fStr, size):
+        packer = struct.Struct(fStr)
+        def read(self):
+            return packer.unpack(self.read_bytes(size))[0]
+        return read
+
+    def __init__(self, typeName:str=None, sizesTable:dict=None):
+        assert bool(typeName), "typeName must not be empty"
+        assert bool(sizesTable), "sizesTable must not be empty"
+        self.typeName=typeName # the first letter must identify the type for KS
+        self.sizesTable=sizesTable
+    
+    funcFactories=(readFuncFac,)
+    def makeAccessorFunc(self, size, endianess, factory):
+        fStr="".join((endianess.char, self.sizesTable[size]))
+        func=factory(fStr, size)
+        func.__doc__="".join((
+            func.__name__, "s ",
+            str(size), "-byte ",
+            endianess.name, " ", self.typeName, "s"
+        ))
+        func.__name__="".join((func.__name__,"_", self.typeName[0], str(size), endianess.name))
+        return func
+    
+    def generateAccessorFunctions(self):
+        for fac in self.funcFactories:
+            for endianness in self.endianessesTable:
+                for size in self.sizesTable.keys():
+                    yield self.makeAccessorFunc(size, endianness, fac)
+
+KNNT=KaitaiNativeNumberType
+default_types_table={
+    KNNT(
+        "unsigned int",
+        {
+            1: "B",
+            2: "H",
+            4: "I",
+            8: "Q",
+        }
+    ),
+    KNNT(
+        "signed int",
+        {
+            1: "b",
+            2: "h",
+            4: "i",
+            8: "q",
+        }
+    ),
+    KNNT(
+        "float",
+        {
+            4: "f",
+            8: "d",
+        }
+    )
+}
+
+def empty(dic, name):
+    return (name not in dic or dic[name] is None)
+
+class KaitaiStreamMeta(type):
+    """A metaclass to generate properties for KaitaiStream classes"""
+    def __new__(cls, className, parents, attrs, *args, **kwargs):
+        if empty(attrs, "types_table"):
+            attrs["types_table"]=default_types_table
+        for t in attrs["types_table"]:
+            for func in t.generateAccessorFunctions():
+                attrs[func.__name__]=func
+        return super().__new__(cls, className, parents, attrs, *args, **kwargs)
+
+class KaitaiStream(metaclass=KaitaiStreamMeta):
     def __init__(self, io):
         self._io = io
         self.align_to_byte()
@@ -60,6 +149,12 @@ class KaitaiStream(object):
 
     def close(self):
         self._io.close()
+
+    def read_u1(self):
+        return self.read_bytes(1)[0]
+    
+    def read_s1(self):
+        return self.read_s1le()
 
     # ========================================================================
     # Stream positioning
@@ -97,122 +192,7 @@ class KaitaiStream(object):
         # Seek back to the current position
         io.seek(cur_pos)
         return full_size
-
-    # ========================================================================
-    # Integer numbers
-    # ========================================================================
-
-    packer_s1 = struct.Struct('b')
-    packer_s2be = struct.Struct('>h')
-    packer_s4be = struct.Struct('>i')
-    packer_s8be = struct.Struct('>q')
-    packer_s2le = struct.Struct('<h')
-    packer_s4le = struct.Struct('<i')
-    packer_s8le = struct.Struct('<q')
-
-    packer_u1 = struct.Struct('B')
-    packer_u2be = struct.Struct('>H')
-    packer_u4be = struct.Struct('>I')
-    packer_u8be = struct.Struct('>Q')
-    packer_u2le = struct.Struct('<H')
-    packer_u4le = struct.Struct('<I')
-    packer_u8le = struct.Struct('<Q')
-
-    # ------------------------------------------------------------------------
-    # Signed
-    # ------------------------------------------------------------------------
-
-    def read_s1(self):
-        return KaitaiStream.packer_s1.unpack(self.read_bytes(1))[0]
-
-    # ........................................................................
-    # Big-endian
-    # ........................................................................
-
-    def read_s2be(self):
-        return KaitaiStream.packer_s2be.unpack(self.read_bytes(2))[0]
-
-    def read_s4be(self):
-        return KaitaiStream.packer_s4be.unpack(self.read_bytes(4))[0]
-
-    def read_s8be(self):
-        return KaitaiStream.packer_s8be.unpack(self.read_bytes(8))[0]
-
-    # ........................................................................
-    # Little-endian
-    # ........................................................................
-
-    def read_s2le(self):
-        return KaitaiStream.packer_s2le.unpack(self.read_bytes(2))[0]
-
-    def read_s4le(self):
-        return KaitaiStream.packer_s4le.unpack(self.read_bytes(4))[0]
-
-    def read_s8le(self):
-        return KaitaiStream.packer_s8le.unpack(self.read_bytes(8))[0]
-
-    # ------------------------------------------------------------------------
-    # Unsigned
-    # ------------------------------------------------------------------------
-
-    def read_u1(self):
-        return KaitaiStream.packer_u1.unpack(self.read_bytes(1))[0]
-
-    # ........................................................................
-    # Big-endian
-    # ........................................................................
-
-    def read_u2be(self):
-        return KaitaiStream.packer_u2be.unpack(self.read_bytes(2))[0]
-
-    def read_u4be(self):
-        return KaitaiStream.packer_u4be.unpack(self.read_bytes(4))[0]
-
-    def read_u8be(self):
-        return KaitaiStream.packer_u8be.unpack(self.read_bytes(8))[0]
-
-    # ........................................................................
-    # Little-endian
-    # ........................................................................
-
-    def read_u2le(self):
-        return KaitaiStream.packer_u2le.unpack(self.read_bytes(2))[0]
-
-    def read_u4le(self):
-        return KaitaiStream.packer_u4le.unpack(self.read_bytes(4))[0]
-
-    def read_u8le(self):
-        return KaitaiStream.packer_u8le.unpack(self.read_bytes(8))[0]
-
-    # ========================================================================
-    # Floating point numbers
-    # ========================================================================
-
-    packer_f4be = struct.Struct('>f')
-    packer_f8be = struct.Struct('>d')
-    packer_f4le = struct.Struct('<f')
-    packer_f8le = struct.Struct('<d')
-
-    # ........................................................................
-    # Big-endian
-    # ........................................................................
-
-    def read_f4be(self):
-        return KaitaiStream.packer_f4be.unpack(self.read_bytes(4))[0]
-
-    def read_f8be(self):
-        return KaitaiStream.packer_f8be.unpack(self.read_bytes(8))[0]
-
-    # ........................................................................
-    # Little-endian
-    # ........................................................................
-
-    def read_f4le(self):
-        return KaitaiStream.packer_f4le.unpack(self.read_bytes(4))[0]
-
-    def read_f8le(self):
-        return KaitaiStream.packer_f8le.unpack(self.read_bytes(8))[0]
-
+    
     # ========================================================================
     # Unaligned bit values
     # ========================================================================
