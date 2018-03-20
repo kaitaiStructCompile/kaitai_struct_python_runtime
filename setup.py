@@ -44,4 +44,6 @@ setup(
     ],
     keywords='kaitai,struct,construct,ksy,declarative,data structure,data format,file format,packet format,binary,parser,parsing,unpack,development',
     py_modules=["kaitaistruct"],
+    requires=["RecursionSafe"],
+    dependency_links=["git+https://github.com/KOLANICH/RecursionSafe.py.git"],
 )
