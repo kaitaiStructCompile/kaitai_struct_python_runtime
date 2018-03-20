@@ -1,12 +1,8 @@
 import itertools
 import sys
+import struct
 from struct import unpack
-
-try:
-    import cStringIO
-    BytesIO = cStringIO.StringIO
-except ImportError:
-    from io import BytesIO  # noqa
+from io import BytesIO  # noqa
 
 PY2 = sys.version_info[0] == 2
 
@@ -17,8 +13,20 @@ PY2 = sys.version_info[0] == 2
 #   KS runtime library by this version number;
 # * distribution utils (setup.py) use this when packaging for PyPI
 #
-__version__ = '0.7'
+__version__ = '0.8'
 
+from RecursionSafe import RecursionSafe
+
+recSafe=RecursionSafe()
+
+@recSafe.wrap
+def repr_generator_for_all_props(self):
+  """Generator to use in own __repr__ functions."""
+  return (
+    "".join(( str(k), "=", repr(getattr(self, k)) ))
+    for k in dir(self)
+    if k[0] != "_" and not hasattr(KaitaiStruct, k) and not isinstance(getattr(self, k), type)
+  )
 
 class KaitaiStruct(object):
     def __init__(self, stream):
@@ -30,6 +38,19 @@ class KaitaiStruct(object):
     def __exit__(self, *args, **kwargs):
         self.close()
 
+    def __repr__(self):
+        return "".join(
+            (
+                self.__class__.__name__,
+                "(",
+                ", ".join( repr_generator_for_all_props(self) ),
+                ")"
+            )
+        )
+
+    def close(self):
+        self._io.close()
+
     @classmethod
     def from_file(cls, filename):
         f = open(filename, 'rb')
@@ -40,8 +61,13 @@ class KaitaiStruct(object):
             f.close()
             raise
 
-    def close(self):
-        self._io.close()
+    @classmethod
+    def from_bytes(cls, buf):
+        return cls(KaitaiStream(BytesIO(buf)))
+
+    @classmethod
+    def from_io(cls, io):
+        return cls(KaitaiStream(io))
 
 
 class KaitaiStream(object):
@@ -82,114 +108,130 @@ class KaitaiStream(object):
         # current file / StringIO size, thus we use the following
         # trick.
         io = self._io
-
         # Remember our current position
         cur_pos = io.tell()
-
         # Seek to the end of the File object
         io.seek(0, 2)
-
         # Remember position, which is equal to the full length
         full_size = io.tell()
-
         # Seek back to the current position
         io.seek(cur_pos)
-
         return full_size
 
     # ========================================================================
     # Integer numbers
     # ========================================================================
 
+    packer_s1 = struct.Struct('b')
+    packer_s2be = struct.Struct('>h')
+    packer_s4be = struct.Struct('>i')
+    packer_s8be = struct.Struct('>q')
+    packer_s2le = struct.Struct('<h')
+    packer_s4le = struct.Struct('<i')
+    packer_s8le = struct.Struct('<q')
+
+    packer_u1 = struct.Struct('B')
+    packer_u2be = struct.Struct('>H')
+    packer_u4be = struct.Struct('>I')
+    packer_u8be = struct.Struct('>Q')
+    packer_u2le = struct.Struct('<H')
+    packer_u4le = struct.Struct('<I')
+    packer_u8le = struct.Struct('<Q')
+
     # ------------------------------------------------------------------------
     # Signed
     # ------------------------------------------------------------------------
 
     def read_s1(self):
-        return unpack('b', self.read_bytes(1))[0]
+        return KaitaiStream.packer_s1.unpack(self.read_bytes(1))[0]
 
     # ........................................................................
     # Big-endian
     # ........................................................................
 
     def read_s2be(self):
-        return unpack('>h', self.read_bytes(2))[0]
+        return KaitaiStream.packer_s2be.unpack(self.read_bytes(2))[0]
 
     def read_s4be(self):
-        return unpack('>i', self.read_bytes(4))[0]
+        return KaitaiStream.packer_s4be.unpack(self.read_bytes(4))[0]
 
     def read_s8be(self):
-        return unpack('>q', self.read_bytes(8))[0]
+        return KaitaiStream.packer_s8be.unpack(self.read_bytes(8))[0]
 
     # ........................................................................
     # Little-endian
     # ........................................................................
 
     def read_s2le(self):
-        return unpack('<h', self.read_bytes(2))[0]
+        return KaitaiStream.packer_s2le.unpack(self.read_bytes(2))[0]
 
     def read_s4le(self):
-        return unpack('<i', self.read_bytes(4))[0]
+        return KaitaiStream.packer_s4le.unpack(self.read_bytes(4))[0]
 
     def read_s8le(self):
-        return unpack('<q', self.read_bytes(8))[0]
+        return KaitaiStream.packer_s8le.unpack(self.read_bytes(8))[0]
 
     # ------------------------------------------------------------------------
     # Unsigned
     # ------------------------------------------------------------------------
 
     def read_u1(self):
-        return unpack('B', self.read_bytes(1))[0]
+        return KaitaiStream.packer_u1.unpack(self.read_bytes(1))[0]
 
     # ........................................................................
     # Big-endian
     # ........................................................................
 
     def read_u2be(self):
-        return unpack('>H', self.read_bytes(2))[0]
+        return KaitaiStream.packer_u2be.unpack(self.read_bytes(2))[0]
 
     def read_u4be(self):
-        return unpack('>I', self.read_bytes(4))[0]
+        return KaitaiStream.packer_u4be.unpack(self.read_bytes(4))[0]
 
     def read_u8be(self):
-        return unpack('>Q', self.read_bytes(8))[0]
+        return KaitaiStream.packer_u8be.unpack(self.read_bytes(8))[0]
 
     # ........................................................................
     # Little-endian
     # ........................................................................
 
     def read_u2le(self):
-        return unpack('<H', self.read_bytes(2))[0]
+        return KaitaiStream.packer_u2le.unpack(self.read_bytes(2))[0]
 
     def read_u4le(self):
-        return unpack('<I', self.read_bytes(4))[0]
+        return KaitaiStream.packer_u4le.unpack(self.read_bytes(4))[0]
 
     def read_u8le(self):
-        return unpack('<Q', self.read_bytes(8))[0]
+        return KaitaiStream.packer_u8le.unpack(self.read_bytes(8))[0]
 
     # ========================================================================
     # Floating point numbers
     # ========================================================================
+
+    packer_f4be = struct.Struct('>f')
+    packer_f8be = struct.Struct('>d')
+    packer_f4le = struct.Struct('<f')
+    packer_f8le = struct.Struct('<d')
 
     # ........................................................................
     # Big-endian
     # ........................................................................
 
     def read_f4be(self):
-        return unpack('>f', self.read_bytes(4))[0]
+        return KaitaiStream.packer_f4be.unpack(self.read_bytes(4))[0]
 
     def read_f8be(self):
-        return unpack('>d', self.read_bytes(8))[0]
+        return KaitaiStream.packer_f8be.unpack(self.read_bytes(8))[0]
 
     # ........................................................................
     # Little-endian
     # ........................................................................
 
     def read_f4le(self):
-        return unpack('<f', self.read_bytes(4))[0]
+        return KaitaiStream.packer_f4le.unpack(self.read_bytes(4))[0]
 
     def read_f8le(self):
-        return unpack('<d', self.read_bytes(8))[0]
+        return KaitaiStream.packer_f8le.unpack(self.read_bytes(8))[0]
 
     # ========================================================================
     # Unaligned bit values
@@ -236,10 +278,16 @@ class KaitaiStream(object):
     # ========================================================================
 
     def read_bytes(self, n):
+        if n < 0:
+            raise ValueError(
+                "requested invalid %d amount of bytes" %
+                (n,)
+            )
         r = self._io.read(n)
         if len(r) < n:
             raise EOFError(
-                "requested %d bytes, but got only %d bytes" % (n, len(r))
+                "requested %d bytes, but got only %d bytes" %
+                (n, len(r))
             )
         return r
 
@@ -253,7 +301,7 @@ class KaitaiStream(object):
             if c == b'':
                 if eos_error:
                     raise Exception(
-                        "End of stream reached, but no terminator %d found" %
+                        "end of stream reached, but no terminator %d found" %
                         (term,)
                     )
                 else:
@@ -271,32 +319,30 @@ class KaitaiStream(object):
         actual = self._io.read(len(expected))
         if actual != expected:
             raise Exception(
-                "Unexpected fixed contents: got %s, was waiting for %s" %
-                (str(actual), str(expected))
+                "unexpected fixed contents: got %r, was waiting for %r" %
+                (actual, expected)
             )
         return actual
 
     @staticmethod
-    def bytes_strip_right(src, pad_byte):
-        new_len = len(src)
+    def bytes_strip_right(data, pad_byte):
+        new_len = len(data)
         if PY2:
-            data = bytearray(src)
-        else:
-            data = src
+            # data[...] must yield an integer, to compare with integer pad_byte
+            data = bytearray(data)
 
-        while data[new_len - 1] == pad_byte:
+        while new_len > 0 and data[new_len - 1] == pad_byte:
             new_len -= 1
 
         return data[:new_len]
 
     @staticmethod
-    def bytes_terminate(src, term, include_term):
+    def bytes_terminate(data, term, include_term):
         new_len = 0
-        max_len = len(src)
+        max_len = len(data)
         if PY2:
-            data = bytearray(src)
-        else:
-            data = src
+            # data[...] must yield an integer, to compare with integer term
+            data = bytearray(data)
 
         while new_len < max_len and data[new_len] != term:
             new_len += 1
@@ -313,26 +359,14 @@ class KaitaiStream(object):
     @staticmethod
     def process_xor_one(data, key):
         if PY2:
-            r = bytearray(data)
-            for i in range(len(r)):
-                r[i] ^= key
-            return bytes(r)
+            return bytes(bytearray(v ^ key for v in bytearray(data)))
         else:
             return bytes(v ^ key for v in data)
 
     @staticmethod
     def process_xor_many(data, key):
         if PY2:
-            r = bytearray(data)
-            k = bytearray(key)
-            ki = 0
-            kl = len(k)
-            for i in range(len(r)):
-                r[i] ^= k[ki]
-                ki += 1
-                if ki >= kl:
-                    ki = 0
-            return bytes(r)
+            return bytes(bytearray(a ^ b for a, b in zip(bytearray(data), itertools.cycle(bytearray(key)))))
         else:
             return bytes(a ^ b for a, b in zip(data, itertools.cycle(key)))
 
